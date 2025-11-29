@@ -8,6 +8,9 @@ transformers>=4.40.0
 huggingface-hub>=0.23.0
 tokenizers>=0.19.0
 
+# ModelScope - 魔搭社区（国内下载推荐）
+modelscope>=1.11.0
+
 # PyTorch (根据您的 CUDA 版本选择合适的版本)
 # 以下是 CUDA 12.1 版本的示例
 # torch>=2.3.0
