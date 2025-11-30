@@ -13,7 +13,7 @@ import platform
 from pathlib import Path
 from typing import List, Dict
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 def get_model_path():
@@ -63,10 +63,22 @@ class Qwen3Inference:
         kwargs = {}
         if load_in_8bit:
             print("使用 8-bit 量化")
-            kwargs["load_in_8bit"] = True
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_threshold=6.0,
+            )
+            kwargs["quantization_config"] = quantization_config
+            kwargs["device_map"] = "auto"
         elif load_in_4bit:
-            print("使用 4-bit 量化")
-            kwargs["load_in_4bit"] = True
+            print("使用 4-bit 量化（优化内存模式）")
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,  # 双重量化，进一步减少内存
+                bnb_4bit_quant_type="nf4",  # 使用 NF4 量化
+            )
+            kwargs["quantization_config"] = quantization_config
+            kwargs["device_map"] = "auto"
         else:
             # 自动选择设备
             if device == "auto":
@@ -82,12 +94,20 @@ class Qwen3Inference:
 
         # 加载模型
         print("加载模型（可能需要几分钟）...")
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            **kwargs
-        )
+        # 如果使用量化，不需要指定 torch_dtype，由量化配置控制
+        if load_in_8bit or load_in_4bit:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                **kwargs
+            )
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                **kwargs
+            )
 
         self.device = device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
 
