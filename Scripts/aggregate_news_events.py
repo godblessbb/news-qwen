@@ -24,13 +24,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
+def load_qwen_model(
+    model_path: str,
+    device: str = "auto",
+    load_in_4bit: bool = False,
+    load_in_8bit: bool = False
+) -> Tuple:
     """
     加载 Qwen 模型和 tokenizer
 
     Args:
         model_path: 模型路径（支持本地路径和 HuggingFace 模型 ID）
         device: 设备（"cuda", "cpu", "auto"）
+        load_in_4bit: 是否使用 4-bit 量化（节省显存）
+        load_in_8bit: 是否使用 8-bit 量化（节省显存）
 
     Returns:
         (model, tokenizer) 元组
@@ -88,14 +95,28 @@ def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
     # 加载模型
     try:
         logger.info("加载模型（可能需要几分钟）...")
+
+        # 配置量化参数
+        model_kwargs = {**load_kwargs}
+
+        if load_in_4bit:
+            logger.info("使用 4-bit 量化加载（需要 bitsandbytes 库）")
+            model_kwargs["load_in_4bit"] = True
+            model_kwargs["device_map"] = "auto"
+        elif load_in_8bit:
+            logger.info("使用 8-bit 量化加载（需要 bitsandbytes 库）")
+            model_kwargs["load_in_8bit"] = True
+            model_kwargs["device_map"] = "auto"
+        else:
+            model_kwargs["torch_dtype"] = torch.float16 if device == "cuda" else torch.float32
+            model_kwargs["device_map"] = device if device != "cpu" else None
+
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device if device != "cpu" else None,
-            **load_kwargs
+            **model_kwargs
         )
 
-        if device == "cpu":
+        if device == "cpu" and not (load_in_4bit or load_in_8bit):
             model = model.to("cpu")
 
         logger.info(f"✓ 模型加载完成，设备: {device}")
@@ -372,11 +393,28 @@ def main():
         help="输出文件路径（JSON 格式）"
     )
 
+    parser.add_argument(
+        "--load-in-4bit",
+        action="store_true",
+        help="使用 4-bit 量化（大幅降低显存需求，需要 bitsandbytes 库）"
+    )
+
+    parser.add_argument(
+        "--load-in-8bit",
+        action="store_true",
+        help="使用 8-bit 量化（降低显存需求，需要 bitsandbytes 库）"
+    )
+
     args = parser.parse_args()
 
     # 加载模型
     try:
-        model, tokenizer = load_qwen_model(args.model_path, args.device)
+        model, tokenizer = load_qwen_model(
+            args.model_path,
+            args.device,
+            load_in_4bit=args.load_in_4bit,
+            load_in_8bit=args.load_in_8bit
+        )
     except Exception as e:
         logger.error(f"模型加载失败: {e}")
         sys.exit(1)
