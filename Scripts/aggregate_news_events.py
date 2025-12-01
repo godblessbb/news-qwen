@@ -38,8 +38,15 @@ def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
     logger.info(f"正在加载模型: {model_path}")
 
     # 检查是否为本地路径
-    model_path_obj = Path(model_path)
-    is_local_path = model_path_obj.exists()
+    # HuggingFace 模型 ID 格式: "organization/model-name" (只包含一个斜杠，无路径分隔符)
+    # 本地路径特征: 包含 \, /, 或 : (驱动器号), 或以 . 开头
+    is_local_path = (
+        os.path.sep in model_path or  # 包含路径分隔符
+        "/" in model_path and not model_path.count("/") == 1 or  # 多个斜杠
+        ":" in model_path or  # Windows 驱动器号
+        model_path.startswith(".") or  # 相对路径
+        model_path.startswith("~")  # 用户目录
+    )
 
     # 加载参数
     load_kwargs = {
@@ -51,6 +58,7 @@ def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
         logger.info(f"检测到本地模型路径: {model_path}")
         load_kwargs["local_files_only"] = True
         # 将路径转换为绝对路径字符串
+        model_path_obj = Path(model_path).expanduser()
         model_path = str(model_path_obj.resolve())
 
     # 加载 tokenizer
