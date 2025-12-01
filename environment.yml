@@ -1,0 +1,21 @@
+name: news-qwen
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    # Hugging Face libraries
+    - transformers>=4.40.0
+    - huggingface-hub>=0.23.0
+    - tokenizers>=0.19.0
+    # ModelScope for China users
+    - modelscope>=1.11.0
+    # Core dependencies
+    - numpy>=1.24.0
+    - accelerate>=0.30.0
+    - sentencepiece>=0.2.0
+    # Quantization support (optional, saves VRAM)
+    - bitsandbytes>=0.41.0
