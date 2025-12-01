@@ -32,6 +32,40 @@
 
 ## 安装步骤
 
+### 0. 创建 Conda 环境
+
+**推荐使用自动化脚本（最简单）：**
+
+Windows 用户：
+```bash
+# 双击运行或在命令行执行
+setup_environment.bat
+```
+
+Linux/macOS 用户：
+```bash
+# 在终端执行
+./setup_environment.sh
+```
+
+**或者使用 environment.yml：**
+```bash
+# 创建环境并安装基础依赖
+conda env create -f environment.yml
+
+# 激活环境
+conda activate news-qwen
+```
+
+**或者手动创建：**
+```bash
+# 创建 Python 3.10 环境
+conda create -n news-qwen python=3.10 -y
+
+# 激活环境
+conda activate news-qwen
+```
+
 ### 1. 安装 PyTorch
 
 根据您的 CUDA 版本安装 PyTorch：
