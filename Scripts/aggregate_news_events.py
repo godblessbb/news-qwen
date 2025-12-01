@@ -48,19 +48,25 @@ def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
         model_path.startswith("~")  # 用户目录
     )
 
+    # 如果看起来是本地路径，验证路径是否存在
+    if is_local_path:
+        model_path_obj = Path(model_path).expanduser().resolve()
+
+        if not model_path_obj.exists():
+            raise FileNotFoundError(
+                f"本地模型路径不存在: {model_path}\n"
+                f"解析后的路径: {model_path_obj}\n"
+                f"请检查路径是否正确"
+            )
+
+        # 使用绝对路径（transformers 自动识别本地路径）
+        model_path = str(model_path_obj)
+        logger.info(f"检测到本地模型路径: {model_path}")
+
     # 加载参数
     load_kwargs = {
         "trust_remote_code": True,
     }
-
-    # 如果是本地路径，添加 local_files_only 参数
-    if is_local_path:
-        logger.info(f"检测到本地模型路径: {model_path}")
-        load_kwargs["local_files_only"] = True
-        # 将路径转换为绝对路径，使用正斜杠格式（transformers 兼容性更好）
-        model_path_obj = Path(model_path).expanduser().resolve()
-        model_path = model_path_obj.as_posix()
-        logger.info(f"转换后的路径: {model_path}")
 
     # 加载 tokenizer
     try:
