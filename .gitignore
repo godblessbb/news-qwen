@@ -54,6 +54,10 @@ output/
 logs/
 *.log
 
+# News data files
+News/
+*.csv
+
 # OS
 .DS_Store
 Thumbs.db
