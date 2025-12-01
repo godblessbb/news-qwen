@@ -1,26 +1,40 @@
-# Qwen3 14B + vLLM 项目依赖
+# News-Qwen 项目依赖
+# 适用于 Windows 和 Linux 系统
 
-# vLLM - 高性能推理引擎
-vllm>=0.6.0
+# ==================== 核心依赖 ====================
 
 # Hugging Face 库
 transformers>=4.40.0
 huggingface-hub>=0.23.0
 tokenizers>=0.19.0
 
-# ModelScope - 魔搭社区（国内下载推荐）
-modelscope>=1.11.0
+# PyTorch (需要根据 CUDA 版本手动安装)
+# CUDA 12.1+: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# CUDA 11.8:  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# 注意：请先安装 PyTorch，再安装此 requirements.txt
 
-# PyTorch (根据您的 CUDA 版本选择合适的版本)
-# 以下是 CUDA 12.1 版本的示例
-# torch>=2.3.0
-# 如果您使用不同的 CUDA 版本，请访问 https://pytorch.org/get-started/locally/ 获取正确的安装命令
-
-# 其他依赖
+# 基础库
 numpy>=1.24.0
+pandas>=2.0.0
 accelerate>=0.30.0
 sentencepiece>=0.2.0
 
-# 可选：性能监控
-# nvidia-ml-py3>=7.352.0
+# ==================== 事件聚合脚本依赖 ====================
+
+# 时区处理
+pytz>=2024.1
+
+# 量化支持（用于 4bit 模型加载）
+bitsandbytes>=0.41.0
+
+# ==================== 可选依赖 ====================
+
+# ModelScope - 魔搭社区（国内用户推荐，用于模型下载）
+modelscope>=1.11.0
+
+# vLLM - 高性能推理引擎（仅 Linux 支持，Windows 用户无需安装）
+# vllm>=0.6.0
+
+# 性能监控
 # psutil>=5.9.0
+# nvidia-ml-py3>=7.352.0
