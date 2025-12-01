@@ -57,9 +57,10 @@ def load_qwen_model(model_path: str, device: str = "auto") -> Tuple:
     if is_local_path:
         logger.info(f"检测到本地模型路径: {model_path}")
         load_kwargs["local_files_only"] = True
-        # 将路径转换为绝对路径字符串
-        model_path_obj = Path(model_path).expanduser()
-        model_path = str(model_path_obj.resolve())
+        # 将路径转换为绝对路径，使用正斜杠格式（transformers 兼容性更好）
+        model_path_obj = Path(model_path).expanduser().resolve()
+        model_path = model_path_obj.as_posix()
+        logger.info(f"转换后的路径: {model_path}")
 
     # 加载 tokenizer
     try:
