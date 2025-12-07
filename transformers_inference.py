@@ -21,7 +21,7 @@ def get_model_path():
     system = platform.system()
 
     if system == "Windows":
-        model_dir = Path("D:/models/qwen3-14b")
+        model_dir = Path("D:/models/qwen2.5-3b")
     else:
         model_dir = Path.home() / "models" / "qwen3-14b"
 

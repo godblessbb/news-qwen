@@ -20,7 +20,7 @@ import uvicorn
 # 您可以在这里修改默认配置
 
 # 默认模型路径（Windows路径示例，根据实际情况修改）
-DEFAULT_MODEL_PATH = "D:/models/qwen2.5-7b"
+DEFAULT_MODEL_PATH = "D:/models/qwen2.5-3b"
 
 # 默认量化设置
 DEFAULT_LOAD_IN_4BIT = True  # 默认使用4-bit量化

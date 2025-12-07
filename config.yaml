@@ -4,7 +4,7 @@
 # 模型配置
 model:
   # 模型路径（本地路径或 HuggingFace 模型 ID）
-  path: "D:/models/qwen2.5-7b"
+  path: "D:/models/qwen2.5-3b"
 
   # 量化设置（4-bit 和 8-bit 互斥，优先使用 4-bit）
   load_in_4bit: true   # 推荐：降低显存需求至 3-4GB
