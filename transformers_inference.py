@@ -13,7 +13,7 @@ import platform
 from pathlib import Path
 from typing import List, Dict
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 def get_model_path():
@@ -59,22 +59,6 @@ class Qwen3Inference:
         print(f"加载模型: {model_path}")
         print(f"设备: {device}")
 
-        # 设置量化配置
-        kwargs = {}
-        if load_in_8bit:
-            print("使用 8-bit 量化")
-            kwargs["load_in_8bit"] = True
-            kwargs["device_map"] = "auto"
-        elif load_in_4bit:
-            print("使用 4-bit 量化")
-            kwargs["load_in_4bit"] = True
-            kwargs["device_map"] = "auto"
-        else:
-            # 自动选择设备
-            if device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            kwargs["device_map"] = device
-
         # 加载 tokenizer
         print("加载 tokenizer...")
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -82,12 +66,38 @@ class Qwen3Inference:
             trust_remote_code=True
         )
 
+        # 设置量化配置和加载参数
+        kwargs = {"trust_remote_code": True}
+
+        if load_in_8bit:
+            print("使用 8-bit 量化")
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True
+            )
+            kwargs["quantization_config"] = quantization_config
+            kwargs["device_map"] = "auto"
+        elif load_in_4bit:
+            print("使用 4-bit 量化（NF4）")
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True
+            )
+            kwargs["quantization_config"] = quantization_config
+            kwargs["device_map"] = "auto"
+        else:
+            # 无量化
+            if device == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            kwargs["device_map"] = device
+            kwargs["torch_dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
+
         # 加载模型
         print("加载模型（可能需要几分钟）...")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
             **kwargs
         )
 
