@@ -1,0 +1,49 @@
+# Qwen 模型配置文件
+# 修改这个文件后重启API服务即可生效
+
+# 模型配置
+model:
+  # 模型路径（本地路径或 HuggingFace 模型 ID）
+  path: "D:/models/qwen2.5-7b"
+
+  # 量化设置（4-bit 和 8-bit 互斥，优先使用 4-bit）
+  load_in_4bit: true   # 推荐：降低显存需求至 3-4GB
+  load_in_8bit: false  # 备选：显存需求 7-8GB
+
+  # 设备设置
+  device: "auto"  # auto/cuda/cpu
+
+# API 服务配置
+api:
+  host: "0.0.0.0"  # "0.0.0.0" 允许外部访问，"127.0.0.1" 仅本机
+  port: 8000       # API 端口
+
+# 生成参数默认值
+generation:
+  max_tokens: 512      # 最大生成令牌数
+  temperature: 0.7     # 温度参数 (0-2)
+  top_p: 0.8          # Top-p 采样 (0-1)
+
+# 新闻处理配置
+news_processing:
+  # 单批次最大新闻条数
+  max_news_per_batch: 15
+
+  # 最大合并批次数（防止显存溢出）
+  max_merge_batches: 8
+
+  # 分析提示词模板
+  analysis_prompt: |
+    你是一位专业的金融分析师。请分析以下关于 {symbol} ({name}) 在交易周期 {start_date} 至 {end_date} 的新闻事件。
+
+    新闻列表：
+    {news_list}
+
+    请提供简洁的事件总结，要求：
+    1. 使用实时性陈述（过去时态）
+    2. 包含重要数据和数字
+    3. 包含情感属性关键词（正面/负面/中性）
+    4. 突出对股价的潜在影响
+    5. 控制在150字以内
+
+    请直接返回事件总结文本，不需要JSON格式。

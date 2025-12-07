@@ -186,6 +186,11 @@ def generate_response(
         skip_special_tokens=True
     )
 
+    # 清理显存
+    del inputs, outputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     return generated_text.strip()
 
 
@@ -326,8 +331,16 @@ def _merge_summaries(
     model, tokenizer, symbol, name,
     start_date, end_date, summaries, max_tokens
 ) -> str:
-    """合并多个批次的总结"""
-    merge_prompt = f"""你是一位专业的金融分析师。以下是关于 {symbol} ({name}) 在交易周期 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 的多个新闻批次分析：
+    """
+    合并多个批次的总结
+
+    如果批次过多（>8个），采用分层合并策略防止显存溢出
+    """
+    MAX_SUMMARIES_PER_MERGE = 8  # 单次合并最多处理8个摘要
+
+    # 如果摘要数量不多，直接合并
+    if len(summaries) <= MAX_SUMMARIES_PER_MERGE:
+        merge_prompt = f"""你是一位专业的金融分析师。以下是关于 {symbol} ({name}) 在交易周期 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 的多个新闻批次分析：
 
 {chr(10).join([f"{i+1}. {summary}" for i, summary in enumerate(summaries)])}
 
@@ -339,9 +352,48 @@ def _merge_summaries(
 
 请直接返回事件总结文本。
 """
+        merged = generate_response(model, tokenizer, merge_prompt, max_tokens=max_tokens)
+        return merged
 
-    merged = generate_response(model, tokenizer, merge_prompt, max_tokens=max_tokens)
-    return merged
+    # 分层合并：先分组合并，再合并结果
+    logger.info(f"批次数量过多 ({len(summaries)})，使用分层合并策略")
+
+    # 第一层：将摘要分成多个小组，每组最多 MAX_SUMMARIES_PER_MERGE 个
+    merged_groups = []
+    for i in range(0, len(summaries), MAX_SUMMARIES_PER_MERGE):
+        group = summaries[i:i + MAX_SUMMARIES_PER_MERGE]
+        group_num = i // MAX_SUMMARIES_PER_MERGE + 1
+        total_groups = (len(summaries) + MAX_SUMMARIES_PER_MERGE - 1) // MAX_SUMMARIES_PER_MERGE
+
+        logger.info(f"  第一层合并 {group_num}/{total_groups}（{len(group)} 个摘要）")
+
+        merge_prompt = f"""请合并以下 {len(group)} 条关于 {symbol} 的新闻分析（控制在120字内）：
+
+{chr(10).join([f"{j+1}. {summary}" for j, summary in enumerate(group)])}
+
+要求：过去时态、包含关键数据、情感属性
+"""
+        group_merged = generate_response(model, tokenizer, merge_prompt, max_tokens=max_tokens)
+        merged_groups.append(group_merged)
+
+    # 第二层：合并所有组的结果
+    logger.info(f"  第二层合并（{len(merged_groups)} 个组摘要）")
+
+    final_prompt = f"""你是一位专业的金融分析师。以下是关于 {symbol} ({name}) 在交易周期 {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')} 的综合分析：
+
+{chr(10).join([f"{i+1}. {summary}" for i, summary in enumerate(merged_groups)])}
+
+请提供最终的事件总结（150字以内），要求：
+1. 使用实时性陈述（过去时态）
+2. 包含重要数据和数字
+3. 包含情感属性关键词
+4. 突出对股价的潜在影响
+
+请直接返回事件总结文本。
+"""
+
+    final_merged = generate_response(model, tokenizer, final_prompt, max_tokens=max_tokens)
+    return final_merged
 
 
 def process_news_file(

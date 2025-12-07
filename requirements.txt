@@ -21,6 +21,22 @@ numpy>=1.24.0
 accelerate>=0.30.0
 sentencepiece>=0.2.0
 
+# 数据处理
+pandas>=2.0.0
+
+# API 服务
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+requests>=2.31.0
+
+# 配置文件
+pyyaml>=6.0
+
+# 量化支持（用于降低显存需求）
+# Windows 用户可能需要使用 bitsandbytes-windows
+bitsandbytes>=0.41.0
+
 # 可选：性能监控
 # nvidia-ml-py3>=7.352.0
 # psutil>=5.9.0
