@@ -322,6 +322,9 @@ def main():
     """主函数"""
     import argparse
 
+    # 声明全局变量（必须在使用前）
+    global DEFAULT_MODEL_PATH, DEFAULT_LOAD_IN_4BIT, DEFAULT_LOAD_IN_8BIT, DEFAULT_DEVICE
+
     parser = argparse.ArgumentParser(description="Qwen 模型 API 服务")
     parser.add_argument(
         "--model-path",
@@ -362,7 +365,6 @@ def main():
     args = parser.parse_args()
 
     # 更新全局配置
-    global DEFAULT_MODEL_PATH, DEFAULT_LOAD_IN_4BIT, DEFAULT_LOAD_IN_8BIT, DEFAULT_DEVICE
     DEFAULT_MODEL_PATH = args.model_path
     DEFAULT_LOAD_IN_4BIT = not args.no_4bit and not args.load_in_8bit
     DEFAULT_LOAD_IN_8BIT = args.load_in_8bit
