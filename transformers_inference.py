@@ -36,7 +36,7 @@ class Qwen3Inference:
         model_path: str = None,
         device: str = "auto",
         load_in_8bit: bool = False,
-        load_in_4bit: bool = False,
+        load_in_4bit: bool = True,  # 默认使用 4-bit 量化
     ):
         """
         初始化模型
@@ -45,7 +45,7 @@ class Qwen3Inference:
             model_path: 模型路径
             device: 设备（"cuda", "cpu", "auto"）
             load_in_8bit: 是否使用 8-bit 量化（节省显存）
-            load_in_4bit: 是否使用 4-bit 量化（节省更多显存）
+            load_in_4bit: 是否使用 4-bit 量化（默认启用，节省更多显存）
         """
         if model_path is None:
             model_path = get_model_path()
@@ -64,9 +64,11 @@ class Qwen3Inference:
         if load_in_8bit:
             print("使用 8-bit 量化")
             kwargs["load_in_8bit"] = True
+            kwargs["device_map"] = "auto"
         elif load_in_4bit:
             print("使用 4-bit 量化")
             kwargs["load_in_4bit"] = True
+            kwargs["device_map"] = "auto"
         else:
             # 自动选择设备
             if device == "auto":
@@ -208,14 +210,14 @@ def main():
         help="设备"
     )
     parser.add_argument(
-        "--load-in-8bit",
+        "--no-4bit",
         action="store_true",
-        help="使用 8-bit 量化（节省显存）"
+        help="禁用 4-bit 量化（默认启用）"
     )
     parser.add_argument(
-        "--load-in-4bit",
+        "--load-in-8bit",
         action="store_true",
-        help="使用 4-bit 量化（节省更多显存）"
+        help="使用 8-bit 量化替代 4-bit"
     )
     parser.add_argument(
         "--interactive",
@@ -236,11 +238,15 @@ def main():
     print("=" * 60)
     print()
 
+    # 处理量化选项：默认4-bit，除非用户指定 --no-4bit 或 --load-in-8bit
+    load_in_4bit = not args.no_4bit and not args.load_in_8bit
+    load_in_8bit = args.load_in_8bit
+
     inference = Qwen3Inference(
         model_path=args.model_path,
         device=args.device,
-        load_in_8bit=args.load_in_8bit,
-        load_in_4bit=args.load_in_4bit,
+        load_in_8bit=load_in_8bit,
+        load_in_4bit=load_in_4bit,
     )
 
     if args.interactive:
