@@ -207,33 +207,55 @@ def load_model(model_path: str, device: str = "auto", use_quantization: bool = T
     Returns:
         model, tokenizer
     """
-    print(f"正在加载模型: {model_path}")
+    import traceback
+
+    # 强制刷新输出
+    def log(msg):
+        print(msg, flush=True)
+
+    log(f"正在加载模型: {model_path}")
 
     # 检查模型路径是否存在
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"模型路径不存在: {model_path}")
 
+    # CUDA 诊断信息
+    log(f"\n--- CUDA 诊断 ---")
+    log(f"PyTorch 版本: {torch.__version__}")
+    log(f"CUDA 可用: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        log(f"CUDA 版本: {torch.version.cuda}")
+        log(f"GPU 数量: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            log(f"GPU {i}: {props.name}")
+            log(f"  显存: {props.total_memory / 1024**3:.1f} GB")
+            log(f"  当前显存使用: {torch.cuda.memory_allocated(i) / 1024**3:.2f} GB")
+    log(f"-----------------\n")
+
     # 加载 tokenizer
+    log(f"加载 tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         model_path,
         trust_remote_code=True
     )
+    log(f"✅ Tokenizer 加载完成")
 
-    print(f"开始加载模型文件...")
+    log(f"开始加载模型文件...")
 
     # 根据 BitsAndBytes 可用性选择量化方式
     quantization_successful = False
 
     if not use_quantization:
-        print(f"⚠️  已禁用 4-bit 量化 (--no-quantize)")
+        log(f"⚠️  已禁用 4-bit 量化 (--no-quantize)")
     elif BITSANDBYTES_AVAILABLE:
         try:
-            print(f"尝试使用 4-bit 量化 (NF4)...")
+            log(f"尝试使用 4-bit 量化 (NF4)...")
 
             # Windows 上 BitsAndBytes 支持有限，先检测
             if platform.system() == "Windows":
-                print(f"⚠️  检测到 Windows 系统，BitsAndBytes 可能不兼容...")
-                print(f"⚠️  如果加载卡住或崩溃，请尝试: --device cuda 或重新安装 bitsandbytes")
+                log(f"⚠️  检测到 Windows 系统，BitsAndBytes 可能不兼容...")
+                log(f"⚠️  如果加载卡住或崩溃，请尝试: --no-quantize")
 
             # 配置 4-bit 量化
             quantization_config = BitsAndBytesConfig(
@@ -243,40 +265,45 @@ def load_model(model_path: str, device: str = "auto", use_quantization: bool = T
                 bnb_4bit_use_double_quant=True
             )
 
+            log(f"开始加载模型到 GPU (4-bit)...")
             # 加载模型
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 quantization_config=quantization_config,
                 device_map=device,
                 trust_remote_code=True,
-                torch_dtype=torch.float16,
             )
 
-            print(f"✅ 模型加载完成 (4-bit 量化)!")
+            log(f"✅ 模型加载完成 (4-bit 量化)!")
             quantization_successful = True
 
         except Exception as e:
-            import traceback
-            print(f"⚠️  4-bit 量化失败!")
-            print(f"⚠️  错误类型: {type(e).__name__}")
-            print(f"⚠️  错误信息: {str(e)[:200]}...")
-            print(f"⚠️  详细堆栈:")
+            log(f"⚠️  4-bit 量化失败!")
+            log(f"⚠️  错误类型: {type(e).__name__}")
+            log(f"⚠️  错误信息: {str(e)[:200]}...")
+            log(f"⚠️  详细堆栈:")
             traceback.print_exc()
-            print(f"\n⚠️  降级使用 float16...")
+            log(f"\n⚠️  降级使用 float16...")
 
     # 如果量化失败或 BitsAndBytes 不可用，使用 float16
     if not quantization_successful:
         if device == "cuda" or (device == "auto" and torch.cuda.is_available()):
-            print(f"使用 float16 (GPU)")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                device_map=device,
-                trust_remote_code=True,
-                torch_dtype=torch.float16,
-            )
-            print(f"✅ 模型加载完成 (float16)!")
+            log(f"使用 float16 (GPU)")
+            log(f"开始加载模型到 GPU...")
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    device_map=device,
+                    trust_remote_code=True,
+                    torch_dtype=torch.float16,
+                )
+                log(f"✅ 模型加载完成 (float16)!")
+            except Exception as e:
+                log(f"❌ float16 加载失败: {e}")
+                traceback.print_exc()
+                raise
         else:
-            print(f"使用 CPU 模式 (float32)")
+            log(f"使用 CPU 模式 (float32)")
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
                 device_map="cpu",
@@ -284,10 +311,10 @@ def load_model(model_path: str, device: str = "auto", use_quantization: bool = T
                 torch_dtype=torch.float32,
                 low_cpu_mem_usage=True
             )
-            print(f"✅ 模型加载完成 (CPU float32)!")
+            log(f"✅ 模型加载完成 (CPU float32)!")
 
-    print(f"模型上下文长度: 32K tokens")
-    print(f"建议单批次输入上限: {MAX_INPUT_CHARS} 字符 (约 {MAX_INPUT_TOKENS} tokens)")
+    log(f"模型上下文长度: 32K tokens")
+    log(f"建议单批次输入上限: {MAX_INPUT_CHARS} 字符 (约 {MAX_INPUT_TOKENS} tokens)")
 
     return model, tokenizer
 
