@@ -290,18 +290,38 @@ def load_model(model_path: str, device: str = "auto", use_quantization: bool = T
         if device == "cuda" or (device == "auto" and torch.cuda.is_available()):
             log(f"使用 float16 (GPU)")
             log(f"开始加载模型到 GPU...")
+
+            # 方案1: 先加载到 CPU，再移动到 GPU（更稳定）
             try:
+                log(f"尝试方案: 先加载到 CPU，再移动到 GPU...")
                 model = AutoModelForCausalLM.from_pretrained(
                     model_path,
-                    device_map=device,
-                    trust_remote_code=True,
                     torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                    device_map=None,  # 不使用 device_map
+                    low_cpu_mem_usage=True,
                 )
-                log(f"✅ 模型加载完成 (float16)!")
+                log(f"模型加载到 CPU 完成，正在移动到 GPU...")
+                model = model.cuda()
+                log(f"✅ 模型加载完成 (float16 on GPU)!")
             except Exception as e:
-                log(f"❌ float16 加载失败: {e}")
+                log(f"❌ 方案1失败: {e}")
                 traceback.print_exc()
-                raise
+
+                # 方案2: 直接使用 device_map="cuda:0"
+                log(f"\n尝试方案2: 直接加载到 cuda:0...")
+                try:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        torch_dtype=torch.float16,
+                        trust_remote_code=True,
+                        device_map="cuda:0",
+                    )
+                    log(f"✅ 模型加载完成 (float16 on cuda:0)!")
+                except Exception as e2:
+                    log(f"❌ 方案2也失败: {e2}")
+                    traceback.print_exc()
+                    raise
         else:
             log(f"使用 CPU 模式 (float32)")
             model = AutoModelForCausalLM.from_pretrained(
