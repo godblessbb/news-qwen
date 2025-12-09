@@ -221,9 +221,11 @@ def load_model(model_path: str, device: str = "auto"):
     print(f"开始加载模型文件...")
 
     # 根据 BitsAndBytes 可用性选择量化方式
+    quantization_successful = False
+
     if BITSANDBYTES_AVAILABLE:
         try:
-            print(f"使用 4-bit 量化 (NF4)")
+            print(f"尝试使用 4-bit 量化 (NF4)...")
 
             # 配置 4-bit 量化
             quantization_config = BitsAndBytesConfig(
@@ -243,43 +245,23 @@ def load_model(model_path: str, device: str = "auto"):
             )
 
             print(f"✅ 模型加载完成 (4-bit 量化)!")
+            quantization_successful = True
 
         except Exception as e:
-            print(f"⚠️  4-bit 量化失败: {e}")
-            print(f"⚠️  降级使用 8-bit 量化...")
+            print(f"⚠️  4-bit 量化失败: {str(e)[:100]}...")
+            print(f"⚠️  BitsAndBytes 不可用或配置有误，降级使用 float16...")
 
-            # 降级到 8-bit
+    # 如果量化失败或 BitsAndBytes 不可用，使用 float16
+    if not quantization_successful:
+        if device == "cuda" or (device == "auto" and torch.cuda.is_available()):
+            print(f"使用 float16 (GPU)")
             model = AutoModelForCausalLM.from_pretrained(
                 model_path,
-                load_in_8bit=True,
                 device_map=device,
                 trust_remote_code=True,
+                torch_dtype=torch.float16,
             )
-
-            print(f"✅ 模型加载完成 (8-bit 量化)!")
-    else:
-        # BitsAndBytes 不可用，使用 8-bit 或 float16
-        print(f"⚠️  BitsAndBytes 不可用")
-
-        if device == "cuda" or (device == "auto" and torch.cuda.is_available()):
-            print(f"使用 8-bit 量化")
-            try:
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    load_in_8bit=True,
-                    device_map=device,
-                    trust_remote_code=True,
-                )
-                print(f"✅ 模型加载完成 (8-bit 量化)!")
-            except:
-                print(f"⚠️  8-bit 量化失败，使用 float16...")
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    device_map=device,
-                    trust_remote_code=True,
-                    torch_dtype=torch.float16,
-                )
-                print(f"✅ 模型加载完成 (float16)!")
+            print(f"✅ 模型加载完成 (float16)!")
         else:
             print(f"使用 CPU 模式 (float32)")
             model = AutoModelForCausalLM.from_pretrained(
