@@ -215,16 +215,22 @@ def load_model(model_path: str, device: str = "auto"):
         bnb_4bit_use_double_quant=True
     )
 
+    # 检查模型路径是否存在
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"模型路径不存在: {model_path}")
+
+    print(f"开始加载模型文件...")
+
     # 加载模型
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         quantization_config=quantization_config,
         device_map=device,
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,  # 使用 dtype 而非废弃的 torch_dtype
     )
 
-    print(f"模型加载完成!")
+    print(f"✅ 模型加载完成!")
     print(f"模型上下文长度: 32K tokens")
     print(f"建议单批次输入上限: {MAX_INPUT_CHARS} 字符 (约 {MAX_INPUT_TOKENS} tokens)")
 
@@ -697,6 +703,20 @@ def main():
     print(f"设备: {args.device}")
     print(f"模型上下文: 32K tokens (约 15,000-28,000 字)")
     print("="*60)
+
+    # 早期验证模型路径
+    if not os.path.exists(model_path):
+        print(f"\n❌ 错误: 模型路径不存在: {model_path}")
+        print(f"\n请确认:")
+        print(f"1. 模型已下载到该路径")
+        print(f"2. 路径格式正确 (Windows: D:/models/qwen2.5-3b)")
+        print(f"3. 或使用 --model-path 参数指定正确路径")
+        return
+
+    # 验证输入文件
+    if not os.path.exists(args.input):
+        print(f"\n❌ 错误: 输入文件不存在: {args.input}")
+        return
 
     # 处理数据
     process_stock_news(
