@@ -21,7 +21,15 @@ import re
 # 添加父目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# 尝试导入 BitsAndBytesConfig，如果失败则使用8-bit量化
+try:
+    from transformers import BitsAndBytesConfig
+    BITSANDBYTES_AVAILABLE = True
+except ImportError:
+    BITSANDBYTES_AVAILABLE = False
+    print("⚠️  警告: BitsAndBytes 不可用，将使用 8-bit 量化")
 
 # ==================== 模型配置 ====================
 
@@ -189,7 +197,7 @@ def get_model_path():
 
 def load_model(model_path: str, device: str = "auto"):
     """
-    加载 Qwen 模型和 tokenizer (默认 4-bit 量化)
+    加载 Qwen 模型和 tokenizer (默认 4-bit 量化，如果不可用则降级)
 
     Args:
         model_path: 模型路径
@@ -199,7 +207,10 @@ def load_model(model_path: str, device: str = "auto"):
         model, tokenizer
     """
     print(f"正在加载模型: {model_path}")
-    print(f"使用 4-bit 量化 (NF4)")
+
+    # 检查模型路径是否存在
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"模型路径不存在: {model_path}")
 
     # 加载 tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -207,30 +218,79 @@ def load_model(model_path: str, device: str = "auto"):
         trust_remote_code=True
     )
 
-    # 配置 4-bit 量化
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True
-    )
-
-    # 检查模型路径是否存在
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"模型路径不存在: {model_path}")
-
     print(f"开始加载模型文件...")
 
-    # 加载模型
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        quantization_config=quantization_config,
-        device_map=device,
-        trust_remote_code=True,
-        dtype=torch.float16,  # 使用 dtype 而非废弃的 torch_dtype
-    )
+    # 根据 BitsAndBytes 可用性选择量化方式
+    if BITSANDBYTES_AVAILABLE:
+        try:
+            print(f"使用 4-bit 量化 (NF4)")
 
-    print(f"✅ 模型加载完成!")
+            # 配置 4-bit 量化
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True
+            )
+
+            # 加载模型
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                quantization_config=quantization_config,
+                device_map=device,
+                trust_remote_code=True,
+                dtype=torch.float16,
+            )
+
+            print(f"✅ 模型加载完成 (4-bit 量化)!")
+
+        except Exception as e:
+            print(f"⚠️  4-bit 量化失败: {e}")
+            print(f"⚠️  降级使用 8-bit 量化...")
+
+            # 降级到 8-bit
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                load_in_8bit=True,
+                device_map=device,
+                trust_remote_code=True,
+            )
+
+            print(f"✅ 模型加载完成 (8-bit 量化)!")
+    else:
+        # BitsAndBytes 不可用，使用 8-bit 或 float16
+        print(f"⚠️  BitsAndBytes 不可用")
+
+        if device == "cuda" or (device == "auto" and torch.cuda.is_available()):
+            print(f"使用 8-bit 量化")
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    load_in_8bit=True,
+                    device_map=device,
+                    trust_remote_code=True,
+                )
+                print(f"✅ 模型加载完成 (8-bit 量化)!")
+            except:
+                print(f"⚠️  8-bit 量化失败，使用 float16...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    device_map=device,
+                    trust_remote_code=True,
+                    torch_dtype=torch.float16,
+                )
+                print(f"✅ 模型加载完成 (float16)!")
+        else:
+            print(f"使用 CPU 模式 (float32)")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map="cpu",
+                trust_remote_code=True,
+                torch_dtype=torch.float32,
+                low_cpu_mem_usage=True
+            )
+            print(f"✅ 模型加载完成 (CPU float32)!")
+
     print(f"模型上下文长度: 32K tokens")
     print(f"建议单批次输入上限: {MAX_INPUT_CHARS} 字符 (约 {MAX_INPUT_TOKENS} tokens)")
 
