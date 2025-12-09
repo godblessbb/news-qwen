@@ -34,12 +34,11 @@ except ImportError:
 # ==================== 模型配置 ====================
 
 # Qwen2.5-3B 模型上下文长度：32K tokens
-# 约等于：
-# - 中文：24,000-28,000 字
-# - 英文：约 24,000 词
-# 为安全起见，我们限制单批次输入为 20,000 tokens (约 15,000 中文字或 18,000 英文词)
-MAX_INPUT_TOKENS = 20000  # 模型输入token上限
-MAX_INPUT_CHARS = 15000   # 单批次最大字符数（保守估计）
+# 但 RTX 4060 (8GB) 显存有限，需要限制输入长度以避免 OOM
+# float16 模型约占 6GB，推理时 attention 需要额外显存
+# 保守设置以确保在 8GB 显卡上稳定运行
+MAX_INPUT_TOKENS = 8000   # 模型输入token上限 (降低以避免OOM)
+MAX_INPUT_CHARS = 6000    # 单批次最大字符数（保守估计）
 
 # 事件分析 Prompt 模板
 EVENT_ANALYSIS_PROMPT = """你是一位专业的事件驱动型股票交易策略分析师。你的任务是从新闻数据中提取对股价有**重大影响**的事件。
@@ -689,26 +688,73 @@ def process_stock_news(
 
     # 按周期分组
     periods = df.groupby(['period_start', 'period_end'])
-    print(f"\n共有 {len(periods)} 个周期")
+    total_periods = len(periods)
+    print(f"\n共有 {total_periods} 个周期")
+
+    # 创建输出目录和文件路径
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"{symbol}.csv")
+
+    # 检查是否有已存在的文件（用于断点续传）
+    processed_periods = set()
+    if os.path.exists(output_file):
+        try:
+            existing_df = pd.read_csv(output_file)
+            # 记录已处理的周期
+            for _, row in existing_df.iterrows():
+                processed_periods.add((row['period_start'], row['period_end']))
+            print(f"📂 发现已有数据文件，包含 {len(existing_df)} 条事件记录")
+            print(f"   已处理 {len(processed_periods)} 个周期，将跳过这些周期继续处理")
+        except Exception as e:
+            print(f"⚠️  读取已有文件失败: {e}，将重新开始")
+            processed_periods = set()
+
+    # 定义 CSV 列顺序
+    csv_columns = ['symbol', 'name', 'period_start', 'period_end', 'event_start',
+                   'event_end', 'event_description', 'earliest_news', 'related_count',
+                   'chg_in_5', 'chg_in_10', 'source']
 
     # 分析每个周期
-    all_events = []
+    total_events = 0
+    period_count = 0
 
     for (period_start, period_end), period_df in periods:
+        period_count += 1
+        period_key = (period_start.strftime('%Y-%m-%d'), period_end.strftime('%Y-%m-%d'))
+
+        # 跳过已处理的周期
+        if period_key in processed_periods:
+            print(f"\n[{period_count}/{total_periods}] 跳过已处理周期: {period_key[0]} 至 {period_key[1]}")
+            continue
+
         print(f"\n{'='*60}")
-        print(f"周期: {period_start.strftime('%Y-%m-%d')} ({period_start.day_name()}) 至 {period_end.strftime('%Y-%m-%d')} ({period_end.day_name()})")
+        print(f"[{period_count}/{total_periods}] 周期: {period_start.strftime('%Y-%m-%d')} ({period_start.day_name()}) 至 {period_end.strftime('%Y-%m-%d')} ({period_end.day_name()})")
         print(f"新闻数量: {len(period_df)}")
 
+        # 清理显存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         # 提取事件
-        events = analyze_period_events(
-            model, tokenizer, symbol, name,
-            period_start, period_end, period_df, max_tokens
-        )
+        try:
+            events = analyze_period_events(
+                model, tokenizer, symbol, name,
+                period_start, period_end, period_df, max_tokens
+            )
+        except torch.cuda.OutOfMemoryError as e:
+            print(f"❌ 显存不足，跳过此周期: {e}")
+            torch.cuda.empty_cache()
+            continue
+        except Exception as e:
+            print(f"❌ 处理失败，跳过此周期: {e}")
+            continue
 
         if events:
             print(f"提取了 {len(events)} 个重大事件")
+            total_events += len(events)
 
-            # 转换为 DataFrame 行
+            # 转换为 DataFrame 行并立即保存
+            event_rows = []
             for event in events:
                 event_row = {
                     'symbol': symbol,
@@ -724,30 +770,27 @@ def process_stock_news(
                     'chg_in_10': event.get('chg_in_10', None),
                     'source': event.get('source', '')
                 }
-                all_events.append(event_row)
+                event_rows.append(event_row)
+
+            # 增量保存到 CSV
+            new_df = pd.DataFrame(event_rows, columns=csv_columns)
+            file_exists = os.path.exists(output_file)
+            new_df.to_csv(output_file, mode='a', header=not file_exists,
+                         index=False, encoding='utf-8-sig')
+            print(f"💾 已保存到: {output_file}")
         else:
             print("未提取到重大事件")
 
-    # 保存结果
-    if all_events:
-        output_df = pd.DataFrame(all_events)
+    # 最终统计
+    print(f"\n{'='*60}")
+    print(f"✅ 处理完成!")
+    print(f"本次新增 {total_events} 个事件")
+    print(f"输出文件: {output_file}")
 
-        # 创建输出目录
-        os.makedirs(output_dir, exist_ok=True)
-
-        # 生成输出文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = os.path.join(output_dir, f"{symbol}.csv")
-
-        output_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-
-        print(f"\n{'='*60}")
-        print(f"✅ 处理完成!")
-        print(f"总共提取了 {len(all_events)} 个事件")
-        print(f"输出文件: {output_file}")
-    else:
-        print(f"\n{'='*60}")
-        print(f"⚠️ 未提取到任何事件")
+    # 显示最终文件统计
+    if os.path.exists(output_file):
+        final_df = pd.read_csv(output_file)
+        print(f"文件总计: {len(final_df)} 个事件")
 
 
 def main():
