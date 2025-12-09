@@ -47,6 +47,8 @@ class Qwen3Inference:
             load_in_8bit: 是否使用 8-bit 量化（节省显存）
             load_in_4bit: 是否使用 4-bit 量化（默认启用，节省更多显存）
         """
+        import traceback
+
         if model_path is None:
             model_path = get_model_path()
 
@@ -59,6 +61,16 @@ class Qwen3Inference:
         print(f"加载模型: {model_path}")
         print(f"设备: {device}")
 
+        # CUDA 诊断信息
+        print(f"\n--- CUDA 诊断 ---")
+        print(f"PyTorch 版本: {torch.__version__}")
+        print(f"CUDA 可用: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA 版本: {torch.version.cuda}")
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print(f"显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        print(f"-----------------\n")
+
         # 加载 tokenizer
         print("加载 tokenizer...")
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -68,42 +80,87 @@ class Qwen3Inference:
 
         # 设置量化配置和加载参数
         kwargs = {"trust_remote_code": True}
+        model_loaded = False
+
+        # Windows 上 BitsAndBytes 可能有问题，添加警告
+        if platform.system() == "Windows" and (load_in_8bit or load_in_4bit):
+            print("⚠️  Windows 上 BitsAndBytes 可能不兼容，如果崩溃请使用 --no-4bit")
 
         if load_in_8bit:
             print("使用 8-bit 量化")
-            quantization_config = BitsAndBytesConfig(
-                load_in_8bit=True,
-                llm_int8_enable_fp32_cpu_offload=True
-            )
-            kwargs["quantization_config"] = quantization_config
-            kwargs["device_map"] = "auto"
-        elif load_in_4bit:
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                    llm_int8_enable_fp32_cpu_offload=True
+                )
+                kwargs["quantization_config"] = quantization_config
+                kwargs["device_map"] = "auto"
+                print("加载模型（可能需要几分钟）...")
+                self.model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
+                model_loaded = True
+                print("✅ 模型加载完成 (8-bit)!")
+            except Exception as e:
+                print(f"❌ 8-bit 量化失败: {e}")
+                traceback.print_exc()
+
+        elif load_in_4bit and not model_loaded:
             print("使用 4-bit 量化（NF4）")
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_compute_dtype=torch.float16,
-                bnb_4bit_use_double_quant=True
-            )
-            kwargs["quantization_config"] = quantization_config
-            kwargs["device_map"] = "auto"
-        else:
-            # 无量化
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True
+                )
+                kwargs["quantization_config"] = quantization_config
+                kwargs["device_map"] = "auto"
+                print("加载模型（可能需要几分钟）...")
+                self.model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
+                model_loaded = True
+                print("✅ 模型加载完成 (4-bit)!")
+            except Exception as e:
+                print(f"❌ 4-bit 量化失败: {e}")
+                traceback.print_exc()
+
+        # 如果量化失败，使用 float16
+        if not model_loaded:
+            print("\n⚠️  量化失败，降级使用 float16...")
             if device == "auto":
                 device = "cuda" if torch.cuda.is_available() else "cpu"
-            kwargs["device_map"] = device
-            kwargs["dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
 
-        # 加载模型
-        print("加载模型（可能需要几分钟）...")
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            **kwargs
-        )
+            if device == "cuda":
+                print("尝试: 先加载到 CPU，再移动到 GPU...")
+                try:
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        torch_dtype=torch.float16,
+                        trust_remote_code=True,
+                        device_map=None,
+                        low_cpu_mem_usage=True,
+                    )
+                    print("模型加载到 CPU 完成，移动到 GPU...")
+                    self.model = self.model.cuda()
+                    model_loaded = True
+                    print("✅ 模型加载完成 (float16 on GPU)!")
+                except Exception as e:
+                    print(f"❌ GPU 加载失败: {e}")
+                    traceback.print_exc()
+
+            if not model_loaded:
+                print("使用 CPU 模式 (float32)...")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch.float32,
+                    trust_remote_code=True,
+                    device_map="cpu",
+                    low_cpu_mem_usage=True,
+                )
+                device = "cpu"
+                print("✅ 模型加载完成 (CPU float32)!")
 
         self.device = device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
 
-        print(f"✓ 模型加载完成，设备: {self.device}")
+        print(f"✓ 模型准备就绪，设备: {self.device}")
 
     def generate(
         self,
