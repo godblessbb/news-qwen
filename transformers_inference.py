@@ -92,7 +92,7 @@ class Qwen3Inference:
             if device == "auto":
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             kwargs["device_map"] = device
-            kwargs["torch_dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
+            kwargs["dtype"] = torch.float16 if torch.cuda.is_available() else torch.float32
 
         # 加载模型
         print("加载模型（可能需要几分钟）...")

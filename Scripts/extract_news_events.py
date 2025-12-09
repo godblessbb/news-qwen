@@ -259,7 +259,7 @@ def load_model(model_path: str, device: str = "auto"):
                 model_path,
                 device_map=device,
                 trust_remote_code=True,
-                torch_dtype=torch.float16,
+                dtype=torch.float16,
             )
             print(f"✅ 模型加载完成 (float16)!")
         else:
@@ -268,7 +268,7 @@ def load_model(model_path: str, device: str = "auto"):
                 model_path,
                 device_map="cpu",
                 trust_remote_code=True,
-                torch_dtype=torch.float32,
+                dtype=torch.float32,
                 low_cpu_mem_usage=True
             )
             print(f"✅ 模型加载完成 (CPU float32)!")
