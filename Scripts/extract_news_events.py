@@ -195,13 +195,14 @@ def get_model_path():
         return str(Path.home() / "models" / "qwen2.5-3b")
 
 
-def load_model(model_path: str, device: str = "auto"):
+def load_model(model_path: str, device: str = "auto", use_quantization: bool = True):
     """
     加载 Qwen 模型和 tokenizer (默认 4-bit 量化，如果不可用则降级)
 
     Args:
         model_path: 模型路径
         device: 设备 (auto/cuda/cpu)
+        use_quantization: 是否使用 4-bit 量化 (Windows 上可能需要禁用)
 
     Returns:
         model, tokenizer
@@ -223,9 +224,16 @@ def load_model(model_path: str, device: str = "auto"):
     # 根据 BitsAndBytes 可用性选择量化方式
     quantization_successful = False
 
-    if BITSANDBYTES_AVAILABLE:
+    if not use_quantization:
+        print(f"⚠️  已禁用 4-bit 量化 (--no-quantize)")
+    elif BITSANDBYTES_AVAILABLE:
         try:
             print(f"尝试使用 4-bit 量化 (NF4)...")
+
+            # Windows 上 BitsAndBytes 支持有限，先检测
+            if platform.system() == "Windows":
+                print(f"⚠️  检测到 Windows 系统，BitsAndBytes 可能不兼容...")
+                print(f"⚠️  如果加载卡住或崩溃，请尝试: --device cuda 或重新安装 bitsandbytes")
 
             # 配置 4-bit 量化
             quantization_config = BitsAndBytesConfig(
@@ -241,15 +249,20 @@ def load_model(model_path: str, device: str = "auto"):
                 quantization_config=quantization_config,
                 device_map=device,
                 trust_remote_code=True,
-                dtype=torch.float16,
+                torch_dtype=torch.float16,
             )
 
             print(f"✅ 模型加载完成 (4-bit 量化)!")
             quantization_successful = True
 
         except Exception as e:
-            print(f"⚠️  4-bit 量化失败: {str(e)[:100]}...")
-            print(f"⚠️  BitsAndBytes 不可用或配置有误，降级使用 float16...")
+            import traceback
+            print(f"⚠️  4-bit 量化失败!")
+            print(f"⚠️  错误类型: {type(e).__name__}")
+            print(f"⚠️  错误信息: {str(e)[:200]}...")
+            print(f"⚠️  详细堆栈:")
+            traceback.print_exc()
+            print(f"\n⚠️  降级使用 float16...")
 
     # 如果量化失败或 BitsAndBytes 不可用，使用 float16
     if not quantization_successful:
@@ -259,7 +272,7 @@ def load_model(model_path: str, device: str = "auto"):
                 model_path,
                 device_map=device,
                 trust_remote_code=True,
-                dtype=torch.float16,
+                torch_dtype=torch.float16,
             )
             print(f"✅ 模型加载完成 (float16)!")
         else:
@@ -268,7 +281,7 @@ def load_model(model_path: str, device: str = "auto"):
                 model_path,
                 device_map="cpu",
                 trust_remote_code=True,
-                dtype=torch.float32,
+                torch_dtype=torch.float32,
                 low_cpu_mem_usage=True
             )
             print(f"✅ 模型加载完成 (CPU float32)!")
@@ -584,7 +597,8 @@ def process_stock_news(
     output_dir: str,
     model_path: str,
     device: str = "auto",
-    max_tokens: int = 2048
+    max_tokens: int = 2048,
+    use_quantization: bool = True
 ):
     """
     处理股票新闻数据，提取事件
@@ -595,9 +609,10 @@ def process_stock_news(
         model_path: 模型路径
         device: 设备
         max_tokens: 最大生成 tokens
+        use_quantization: 是否使用 4-bit 量化
     """
     # 加载模型
-    model, tokenizer = load_model(model_path, device)
+    model, tokenizer = load_model(model_path, device, use_quantization)
 
     # 读取数据
     print(f"\n正在读取数据: {input_csv}")
@@ -729,16 +744,23 @@ def main():
         help='最大生成 tokens (默认: 2048)'
     )
 
+    parser.add_argument(
+        '--no-quantize',
+        action='store_true',
+        help='禁用 4-bit 量化，直接使用 float16 (Windows 上如果 BitsAndBytes 有问题可以尝试此选项)'
+    )
+
     args = parser.parse_args()
 
     # 获取模型路径
     model_path = args.model_path if args.model_path else get_model_path()
 
     # 打印配置
+    quantization_mode = "float16 (无量化)" if args.no_quantize else "4-bit 量化"
     print("="*60)
     print("事件驱动型新闻分析脚本")
     print("="*60)
-    print(f"模型: Qwen2.5-3B (4-bit 量化)")
+    print(f"模型: Qwen2.5-3B ({quantization_mode})")
     print(f"模型路径: {model_path}")
     print(f"输入文件: {args.input}")
     print(f"输出目录: {args.output_dir}")
@@ -766,7 +788,8 @@ def main():
         output_dir=args.output_dir,
         model_path=model_path,
         device=args.device,
-        max_tokens=args.max_tokens
+        max_tokens=args.max_tokens,
+        use_quantization=not args.no_quantize
     )
 
 
