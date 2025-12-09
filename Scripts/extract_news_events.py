@@ -37,8 +37,9 @@ except ImportError:
 # 但 RTX 4060 (8GB) 显存有限，需要限制输入长度以避免 OOM
 # float16 模型约占 6GB，推理时 attention 需要额外显存
 # 保守设置以确保在 8GB 显卡上稳定运行
-MAX_INPUT_TOKENS = 8000   # 模型输入token上限 (降低以避免OOM)
-MAX_INPUT_CHARS = 6000    # 单批次最大字符数（保守估计）
+MAX_INPUT_TOKENS = 4000   # 模型输入token上限 (进一步降低)
+MAX_INPUT_CHARS = 3000    # 单批次最大字符数
+MAX_NEWS_PER_BATCH = 15   # 每批次最多处理的新闻条数
 
 # 事件分析 Prompt 模板
 EVENT_ANALYSIS_PROMPT = """你是一位专业的事件驱动型股票交易策略分析师。你的任务是从新闻数据中提取对股价有**重大影响**的事件。
@@ -109,54 +110,14 @@ EVENT_ANALYSIS_PROMPT = """你是一位专业的事件驱动型股票交易策�
 
 5. **情感色彩**: 判断事件对股价的影响（正面/中性/负面）
 
-**输出格式** (JSON数组，每个事件一个对象):
-
+**输出格式** (JSON数组):
 ```json
-[
-  {{
-    "event_start": "2024-11-08 10:55:00",
-    "event_end": "2024-11-09 15:30:00",
-    "event_description": "苹果公布2024财年Q4财报，营收949亿美元同比增长6%，iPhone营收463亿美元超预期，净利润147亿美元。财报显示服务业务持续增长，但大中华区营收下降。整体业绩超华尔街预期，股价影响偏正面。",
-    "earliest_news_title": "Apple Reports Fourth Quarter Results",
-    "earliest_news_date": "2024-11-08 10:55:00",
-    "related_count": 5,
-    "chg_in_5": 2.5,
-    "chg_in_10": 5.3,
-    "source": "Apple Newsroom"
-  }},
-  {{
-    "event_start": "2024-11-10 09:00:00",
-    "event_end": "2024-11-10 09:00:00",
-    "event_description": "苹果与OpenAI达成战略合作，将ChatGPT集成到iOS 18中。合作将使Siri能够调用ChatGPT功能，提升AI能力。此举标志苹果加速AI布局，对股价影响偏正面。",
-    "earliest_news_title": "Apple and OpenAI Announce Partnership",
-    "earliest_news_date": "2024-11-10 09:00:00",
-    "related_count": 3,
-    "chg_in_5": 1.8,
-    "chg_in_10": 4.2,
-    "source": "Bloomberg"
-  }},
-  {{
-    "event_start": "2024-11-12 14:20:00",
-    "event_end": "2024-11-13 18:45:00",
-    "event_description": "美国政府宣布对中国出口iPhone所需芯片实施新的限制措施，禁止使用特定制程芯片。此举可能严重影响苹果供应链和对华销售。多家分析师下调苹果目标价，预计将影响Q1出货量。股价影响明显负面。",
-    "earliest_news_title": "US Imposes New Chip Export Restrictions",
-    "earliest_news_date": "2024-11-12 14:20:00",
-    "related_count": 8,
-    "chg_in_5": -4.2,
-    "chg_in_10": -6.8,
-    "source": "Reuters"
-  }}
-]
+[{{"event_start": "日期时间", "event_end": "日期时间", "event_description": "事件描述(含影响判断)", "earliest_news_title": "最早新闻标题", "earliest_news_date": "日期时间", "related_count": 数量, "chg_in_5": 5日涨跌, "chg_in_10": 10日涨跌, "source": "来源"}}]
 ```
 
-**重要**:
-- 如果本批次新闻中没有符合条件的重大事件，返回空数组: []
-- 只返回JSON数组，不要任何其他文字
-- event_description 需要高度概括，包含关键数据和情感倾向
-- earliest_news_title、earliest_news_date、chg_in_5、chg_in_10、source 必须来自实际新闻数据
-- related_count 是被归类到该事件的新闻条数
+**重要**: 无重大事件返回[]，只返回JSON，数据来自实际新闻。
 
-请开始分析:"""
+请分析:"""
 
 # 批次合并 Prompt
 MERGE_EVENTS_PROMPT = """你是一位专业的事件驱动型股票交易策略分析师。现在需要合并多个批次分析得到的事件。
@@ -523,12 +484,15 @@ def analyze_period_events(
     Returns:
         事件列表
     """
-    # 格式化新闻数据
-    news_text = format_news_for_prompt(news_df)
+    num_news = len(news_df)
+
+    # 使用固定的批次大小，确保不会 OOM
+    batch_size = min(MAX_NEWS_PER_BATCH, num_news)
 
     # 检查是否需要分批
-    if len(news_text) <= MAX_INPUT_CHARS:
+    if num_news <= batch_size:
         # 单批次处理
+        news_text = format_news_for_prompt(news_df)
         prompt = EVENT_ANALYSIS_PROMPT.format(
             symbol=symbol,
             name=name,
@@ -538,7 +502,7 @@ def analyze_period_events(
             news_data=news_text
         )
 
-        print(f"  单批次处理 {len(news_df)} 条新闻...")
+        print(f"  单批次处理 {num_news} 条新闻...")
         response = generate_response(model, tokenizer, prompt, max_tokens)
         events = parse_events_json(response)
 
@@ -546,21 +510,17 @@ def analyze_period_events(
 
     else:
         # 分批处理
-        print(f"  新闻数据较大，采用分批处理...")
-
-        # 计算批次大小
-        num_news = len(news_df)
-        batch_size = max(1, int(MAX_INPUT_CHARS / (len(news_text) / num_news)))
-        batch_size = min(batch_size, num_news)
+        num_batches = (num_news + batch_size - 1) // batch_size
+        print(f"  分批处理: {num_news} 条新闻 → {num_batches} 批次 (每批 {batch_size} 条)")
 
         all_events = []
-        num_batches = (num_news + batch_size - 1) // batch_size
 
         for i in range(0, num_news, batch_size):
             batch_news = news_df.iloc[i:i+batch_size]
             batch_text = format_news_for_prompt(batch_news)
+            batch_num = i // batch_size + 1
 
-            batch_info = f"\n**注意**: 这是第 {i//batch_size + 1}/{num_batches} 批次，本批次包含 {len(batch_news)} 条新闻。"
+            batch_info = f"\n**注意**: 第 {batch_num}/{num_batches} 批次，{len(batch_news)} 条新闻。"
 
             prompt = EVENT_ANALYSIS_PROMPT.format(
                 symbol=symbol,
@@ -571,7 +531,7 @@ def analyze_period_events(
                 news_data=batch_text
             )
 
-            print(f"    批次 {i//batch_size + 1}/{num_batches}: {len(batch_news)} 条新闻...")
+            print(f"    批次 {batch_num}/{num_batches}: {len(batch_news)} 条新闻...")
             response = generate_response(model, tokenizer, prompt, max_tokens)
             batch_events = parse_events_json(response)
 
